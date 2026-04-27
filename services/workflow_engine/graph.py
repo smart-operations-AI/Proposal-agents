@@ -40,7 +40,8 @@ async def signal_normalization_node(state: AgentState) -> Dict[str, Any]:
 async def policy_guardrails_node(state: AgentState) -> Dict[str, Any]:
     print("--- APPLYING GUARDRAILS ---")
     signal = state.get("current_signal")
-    if not signal:
+    command = state.get("active_command")
+    if not signal or not command:
         return {"is_blocked": True}
     
     # 1. Idempotency Check
@@ -49,13 +50,27 @@ async def policy_guardrails_node(state: AgentState) -> Dict[str, Any]:
     if await idem.is_duplicate(signal):
         return {"is_blocked": True, "blocking_reason": "Duplicate action within window"}
 
-    # 2. Strategic Account Check
-    # 3. Decision-Action Reconciliation & Token Generation
+    # 2. Policy Engine Validation
+    from services.policy_engine.engine import PolicyEngine
+    # Mock tenant config retrieval
+    tenant_config = {"min_margin_pct": 10.0, "max_discount_pct": 15.0}
+    policy_engine = PolicyEngine(tenant_config)
+    
+    # Strategic Account Escalation
+    if await policy_engine.is_strategic_account(signal.client_id):
+        from services.escalation_service.service import EscalationService
+        esc = EscalationService(state["tenant_id"], state["trace_id"])
+        await esc.escalate_to_human(signal.client_id, "Strategic Account detected", {"signal": signal.model_dump()})
+        return {"is_blocked": True, "blocking_reason": "Escalated: Strategic Account"}
+
+    is_valid, reason = await policy_engine.validate_command(command, signal)
+    if not is_valid:
+        return {"is_blocked": True, "blocking_reason": f"Policy Violation: {reason}"}
+
+    # 3. Validation Token Generation
     import secrets
     validation_token = secrets.token_hex(16)
     
-    print(f"--- Guardrails Passed. Token: {validation_token} ---")
-        
     return {
         "is_blocked": False,
         "validation_token": validation_token
