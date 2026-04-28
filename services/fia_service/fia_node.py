@@ -60,55 +60,44 @@ async def fia_decision_node(state: AgentState) -> Dict[str, Any]:
         "tenant_config": tenant_config # Pass it down to avoid multiple DB hits
     }
 
+from libs.ml.local_inference import LocalInferenceEngine
+import json
+
 async def fia_expert_node(state: AgentState) -> Dict[str, Any]:
     tenant_id = state["tenant_id"]
     logger = AgentLogger("FIA-Expert", tenant_id, state.get("trace_id", "unknown"))
-    logger.info("FIA Expert processing signal")
+    local_llm = LocalInferenceEngine()
     
     current_signal = state.get("current_signal")
     if not current_signal:
-        return {"errors": ["No signal provided to FIA Expert"]}
+        return {"errors": ["No signal provided"]}
 
-    # 1. Load Tenant Config
-    config_service = TenantConfigService()
-    tenant_config = config_service.get_config(tenant_id)
-    
-    # 2. Retrieval of Context (Private Memory)
-    memory = ChromaStore()
-    context = memory.query_policies(
-        tenant_id=tenant_id,
-        query_text=f"Financial strategy for {current_signal.signal_type}",
-        namespace="fia_expert" # Private memory namespace
-    )
-    
-    # 3. Decision Logic
-    priority_engine = PriorityEngine()
-    exec_cost = (tenant_config or {}).get("standard_execution_cost", 50.0)
-    roi = priority_engine.calculate_roi(current_signal, exec_cost)
-    
-    # Check if we should decline
-    if roi < 1.0 and current_signal.urgency_level != "high":
-        logger.info("FIA Expert declining: Low ROI")
-        return {"expert_outputs": []} # Decline processing
+    # 1. Rejection Logic: Is this signal within financial domain?
+    if current_signal.signal_type not in [SignalType.RETAIN, SignalType.UPSELL]:
+        logger.info("FIA Expert rejecting: Signal type out of domain")
+        return {"expert_outputs": current_signal.expert_outputs}
 
+    # 2. Local Inference with System Prompt
+    system_prompt = """You are a Senior Financial Intelligence Agent. 
+    Analyze the signal and propose a financial strategy (discounts, ROI optimization).
+    Return a JSON with: action, params, confidence, rationale."""
+    
+    response = await local_llm.chat(system_prompt, f"Signal: {current_signal.model_dump_json()}")
+    result = json.loads(response)
+    
+    # 3. Create Expert Output
     expert_output = ExpertOutput(
         expert_name="fia_expert",
         output={
-            "action_intent": current_signal.signal_type,
-            "params": {
-                "max_discount": current_signal.max_discount_pct or (tenant_config or {}).get("default_offer_discount", 0.1),
-                "roi": roi
-            }
+            "action_intent": result.get("action"),
+            "params": result.get("params")
         },
-        confidence=0.9 if roi > 2.0 else 0.7,
-        rationale=f"High ROI detected ({roi:.2f}). Financial context applied."
+        confidence=result.get("confidence", 0.8),
+        rationale=result.get("rationale", "Financial analysis complete.")
     )
     
-    # Append to existing outputs
     current_outputs = current_signal.expert_outputs or []
     current_outputs.append(expert_output)
     current_signal.expert_outputs = current_outputs
     
-    return {
-        "current_signal": current_signal
-    }
+    return {"current_signal": current_signal}

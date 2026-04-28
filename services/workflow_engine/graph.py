@@ -100,10 +100,15 @@ def should_continue(state: AgentState):
         return "end"
     return "continue"
 
+from langgraph.checkpoint.postgres import PostgresSaver
+from libs.persistence.database import get_engine
+import os
+
 # --- Graph Construction ---
 
 workflow = StateGraph(AgentState)
 
+# ... (nodes and edges stay the same)
 workflow.add_node("validate", validate_input_node)
 workflow.add_node("normalize", signal_normalization_node)
 workflow.add_node("router", router_node)
@@ -121,7 +126,6 @@ workflow.set_entry_point("validate")
 workflow.add_edge("validate", "normalize")
 workflow.add_edge("normalize", "router")
 
-# Conditional routing to experts
 workflow.add_conditional_edges(
     "router",
     route_to_experts,
@@ -133,7 +137,6 @@ workflow.add_conditional_edges(
     }
 )
 
-# All experts lead to aggregator
 workflow.add_edge("fia_expert", "aggregator")
 workflow.add_edge("sea_expert", "aggregator")
 workflow.add_edge("risk_expert", "aggregator")
@@ -153,4 +156,10 @@ workflow.add_conditional_edges(
 workflow.add_edge("sea_execution", "outcome")
 workflow.add_edge("outcome", END)
 
-app = workflow.compile()
+# Checkpointing with PostgreSQL
+DB_URL = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/revenue_db")
+# Note: In a real environment, PostgresSaver requires an async connection pool
+# For this structure, we define the pattern for persistent auditing
+checkpointer = PostgresSaver.from_conn_string(DB_URL)
+
+app = workflow.compile(checkpointer=checkpointer)
