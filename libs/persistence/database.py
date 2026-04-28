@@ -63,8 +63,12 @@ class AuditLog(Base):
     new_state = Column(JSON)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)
 
-# Utility to get engine (e.g. SQLite for dev)
-def get_engine(connection_string="sqlite:///./revenue_agents.db"):
+import os
+
+# Utility to get engine
+def get_engine(connection_string=None):
+    if connection_string is None:
+        connection_string = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/revenue_db")
     return create_engine(connection_string)
 
 def init_db(engine):

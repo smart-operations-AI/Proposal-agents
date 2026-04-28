@@ -7,8 +7,8 @@ from libs.persistence.database import get_engine, SignalRecord
 from sqlalchemy.orm import sessionmaker
 
 class IdempotencyManager:
-    def __init__(self, db_url: str = "sqlite:///./revenue_agents.db"):
-        self.engine = get_engine(db_url)
+    def __init__(self):
+        self.engine = get_engine()
         self.Session = sessionmaker(bind=self.engine)
 
     def generate_signal_hash(self, signal: InternalSignal) -> str:

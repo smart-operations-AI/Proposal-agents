@@ -10,6 +10,10 @@ class AgentState(TypedDict):
     # Processed Data
     signals: List[InternalSignal]
     
+    # MoE Multi-Agent Fields
+    selected_experts: List[str]
+    routing_rationale: Optional[str]
+    
     # Intelligence Layer Output
     current_signal: Optional[InternalSignal]
     active_command: Optional[RevenueCommand]

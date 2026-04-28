@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
 from pydantic import BaseModel, Field, ConfigDict
 
 # --- Enums ---
@@ -42,6 +42,12 @@ class InputPayload(BaseModel):
     model_version: str
     predictions: List[PredictionEntry]
 
+class ExpertOutput(BaseModel):
+    expert_name: str
+    output: Dict[str, Any]
+    confidence: float
+    rationale: str
+
 # --- Internal Signals ---
 
 class InternalSignal(BaseModel):
@@ -59,6 +65,12 @@ class InternalSignal(BaseModel):
     requires_human_review: bool = False
     expires_at: datetime
     rationale: str = Field(description="Agent's reasoning for this signal")
+    
+    # MoE Extension
+    expert_affinities: Dict[str, float] = Field(default_factory=dict)
+    routing_rationale: Optional[str] = None
+    expert_outputs: List[ExpertOutput] = Field(default_factory=list)
+    
     metadata: dict = Field(default_factory=dict)
 
 class RevenueCommand(BaseModel):

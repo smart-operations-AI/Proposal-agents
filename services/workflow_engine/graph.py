@@ -1,7 +1,10 @@
-from typing import Dict, Any
-from langgraph.graph import StateGraph, END
 from .state import AgentState
-from services.fia_service.fia_node import fia_decision_node
+from services.router_service.router_node import router_node
+from services.fia_service.fia_node import fia_expert_node
+from services.sea_service.sea_node import sea_expert_node
+from services.risk_service.risk_node import risk_expert_node
+from services.escalation_service.escalation_expert_node import escalation_expert_node
+from services.aggregator_service.aggregator_node import aggregator_node
 from services.sea_service.sea_node import sea_execution_node
 
 # --- Node Definitions ---
@@ -15,7 +18,6 @@ async def validate_input_node(state: AgentState) -> Dict[str, Any]:
 
 async def signal_normalization_node(state: AgentState) -> Dict[str, Any]:
     print("--- NORMALIZING SIGNALS ---")
-    # In a real scenario, this might call the PySpark job or a lighter service
     from libs.contracts.models import InternalSignal, SignalType
     import uuid
     from datetime import datetime, timedelta
@@ -28,10 +30,11 @@ async def signal_normalization_node(state: AgentState) -> Dict[str, Any]:
             client_id=pred.client_id,
             signal_type=SignalType.RETAIN if pred.model_type == "churn" else SignalType.UPSELL,
             priority_score=pred.recommended_priority,
-            estimated_revenue_impact=1000.0, # Placeholder
+            estimated_revenue_impact=1000.0,
             segment="mid_market",
             urgency_level="high" if pred.score > 0.8 else "low",
-            expires_at=datetime.now() + timedelta(hours=pred.validity_window_hours)
+            expires_at=datetime.now() + timedelta(hours=pred.validity_window_hours),
+            rationale="Initial normalization"
         )
         signals.append(signal)
     
@@ -52,33 +55,16 @@ async def policy_guardrails_node(state: AgentState) -> Dict[str, Any]:
 
     # 2. Policy Engine Validation
     from services.policy_engine.engine import PolicyEngine
-    tenant_config = state.get("tenant_config", {})
-    if not tenant_config:
-        # Fallback to DB if not in state
-        from libs.tenants.config import TenantConfigService
-        tenant_config = TenantConfigService().get_config(state["tenant_id"])
-        
+    tenant_config = state.get("tenant_config", {}) or {}
     policy_engine = PolicyEngine(tenant_config)
     
-    # Strategic Account Escalation
-    if await policy_engine.is_strategic_account(signal.client_id):
-        from services.escalation_service.service import EscalationService
-        esc = EscalationService(state["tenant_id"], state["trace_id"])
-        await esc.escalate_to_human(signal.client_id, "Strategic Account detected", {"signal": signal.model_dump()})
-        return {"is_blocked": True, "blocking_reason": "Escalated: Strategic Account"}
-
     is_valid, reason = await policy_engine.validate_command(command, signal)
     if not is_valid:
         return {"is_blocked": True, "blocking_reason": f"Policy Violation: {reason}"}
 
     # 3. Validation Token Generation
     import secrets
-    validation_token = secrets.token_hex(16)
-    
-    return {
-        "is_blocked": False,
-        "validation_token": validation_token
-    }
+    return {"is_blocked": False, "validation_token": secrets.token_hex(16)}
 
 async def outcome_tracking_node(state: AgentState) -> Dict[str, Any]:
     print("--- TRACKING OUTCOMES ---")
@@ -88,25 +74,26 @@ async def outcome_tracking_node(state: AgentState) -> Dict[str, Any]:
     tracker = OutcomeTracker()
     logs = state.get("execution_logs", [])
     outcomes = []
-    
     for log in logs:
-        # Mocking an immediate outcome for demonstration
-        # In reality, this might be triggered later by a webhook
         outcome = Outcome(
             execution_id=log.execution_id,
             signal_id=log.signal_id,
             client_id=log.client_id,
             outcome_status=OutcomeStatus.REVENUE_PROTECTED if log.status == "executed" else OutcomeStatus.FAILED,
-            revenue_protected=1200.0, # Mock impact
+            revenue_protected=1000.0,
             time_to_outcome_minutes=10,
             attribution_confidence=0.9
         )
         await tracker.record_outcome(outcome, state["tenant_id"])
         outcomes.append(outcome)
-        
     return {"outcomes": outcomes}
 
-# --- Conditional Logic ---
+# --- Routing Logic ---
+
+def route_to_experts(state: AgentState):
+    # This function returns the list of nodes to visit
+    # In Phase 2/3, we might visit only one, but MoE allows k > 1
+    return state.get("selected_experts", ["fia_expert"])
 
 def should_continue(state: AgentState):
     if state.get("is_blocked"):
@@ -119,27 +106,51 @@ workflow = StateGraph(AgentState)
 
 workflow.add_node("validate", validate_input_node)
 workflow.add_node("normalize", signal_normalization_node)
-workflow.add_node("fia", fia_decision_node)
+workflow.add_node("router", router_node)
+workflow.add_node("fia_expert", fia_expert_node)
+workflow.add_node("sea_expert", sea_expert_node)
+workflow.add_node("risk_expert", risk_expert_node)
+workflow.add_node("escalate", escalation_expert_node)
+workflow.add_node("aggregator", aggregator_node)
 workflow.add_node("policy", policy_guardrails_node)
-workflow.add_node("sea", sea_execution_node)
+workflow.add_node("sea_execution", sea_execution_node)
 workflow.add_node("outcome", outcome_tracking_node)
 
 workflow.set_entry_point("validate")
 
 workflow.add_edge("validate", "normalize")
-workflow.add_edge("normalize", "fia")
-workflow.add_edge("fia", "policy")
+workflow.add_edge("normalize", "router")
+
+# Conditional routing to experts
+workflow.add_conditional_edges(
+    "router",
+    route_to_experts,
+    {
+        "fia_expert": "fia_expert",
+        "sea_expert": "sea_expert",
+        "risk_expert": "risk_expert",
+        "escalate": "escalate"
+    }
+)
+
+# All experts lead to aggregator
+workflow.add_edge("fia_expert", "aggregator")
+workflow.add_edge("sea_expert", "aggregator")
+workflow.add_edge("risk_expert", "aggregator")
+workflow.add_edge("escalate", "aggregator")
+
+workflow.add_edge("aggregator", "policy")
 
 workflow.add_conditional_edges(
     "policy",
     should_continue,
     {
-        "continue": "sea",
+        "continue": "sea_execution",
         "end": END
     }
 )
 
-workflow.add_edge("sea", "outcome")
+workflow.add_edge("sea_execution", "outcome")
 workflow.add_edge("outcome", END)
 
 app = workflow.compile()

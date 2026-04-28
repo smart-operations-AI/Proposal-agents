@@ -2,12 +2,55 @@ from typing import Dict, Any
 from datetime import datetime
 import uuid
 from services.workflow_engine.state import AgentState
-from libs.contracts.models import ExecutionLog, ExecutionStatus, SignalType
-from libs.adapters.crm_adapter import SalesforceCRMAdapter
-from libs.adapters.erp_adapter import SAPERPAdapter
-from libs.adapters.messaging_adapters import WhatsAppAdapter, EmailAdapter
+from libs.contracts.models import ExecutionLog, ExecutionStatus, SignalType, ExpertOutput
+from libs.memory.chroma_store import ChromaStore
+from libs.telemetry.logger import AgentLogger
+
+async def sea_expert_node(state: AgentState) -> Dict[str, Any]:
+    tenant_id = state["tenant_id"]
+    logger = AgentLogger("SEA-Expert", tenant_id, state.get("trace_id", "unknown"))
+    logger.info("SEA Expert proposing execution strategy")
+    
+    current_signal = state.get("current_signal")
+    if not current_signal:
+        return {"errors": ["No signal provided to SEA Expert"]}
+
+    # 1. Retrieval of Sales Context
+    memory = ChromaStore()
+    context = memory.query_policies(
+        tenant_id=tenant_id,
+        query_text=f"Sales outreach for {current_signal.signal_type}",
+        namespace="sea_expert"
+    )
+    
+    # 2. Proposal Logic
+    # SEA focuses on the "how" - which channels and messages
+    channels = ["EMAIL", "WHATSAPP"] if current_signal.urgency_level == "high" else ["EMAIL"]
+    
+    expert_output = ExpertOutput(
+        expert_name="sea_expert",
+        output={
+            "action_intent": current_signal.signal_type,
+            "params": {
+                "channels": channels,
+                "message_tone": "urgent" if current_signal.priority_score > 80 else "nurturing"
+            }
+        },
+        confidence=0.8,
+        rationale=f"Selected channels {channels} based on urgency level."
+    )
+    
+    # Append to existing outputs
+    current_outputs = current_signal.expert_outputs or []
+    current_outputs.append(expert_output)
+    current_signal.expert_outputs = current_outputs
+    
+    return {
+        "current_signal": current_signal
+    }
 
 async def sea_execution_node(state: AgentState) -> Dict[str, Any]:
+    # ... (rest of the file remains similar but uses the active_command)
     command = state.get("active_command")
     token = state.get("validation_token")
     
