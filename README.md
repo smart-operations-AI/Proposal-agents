@@ -27,10 +27,17 @@ Platform for multi-agent revenue automation protocols using FIA (Financial Intel
 
 2. Run the sample worker:
    ```bash
+   $env:PYTHONPATH="."
    python apps/worker/main.py
    ```
 
-3. Run tests:
+3. Run the API Gateway:
+   ```bash
+   $env:PYTHONPATH="."
+   uvicorn services.model_gateway.api:api --reload
+   ```
+
+4. Run tests:
    ```bash
    pytest
    ```
