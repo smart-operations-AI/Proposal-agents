@@ -7,27 +7,32 @@ class PolicyEngine:
 
     async def validate_command(self, command: RevenueCommand, signal: InternalSignal) -> (bool, Optional[str]):
         """
-        Validate a command against tenant-specific rules.
+        Validate a command using ONLY tenant-specific configuration.
         """
         # 1. Margin Check
-        min_margin = self.config.get("min_margin_pct", 10.0)
-        current_margin = signal.metadata.get("current_margin", 20.0)
+        min_margin = self.config.get("min_margin_pct")
+        if min_margin is None:
+            return False, "Configuration error: min_margin_pct not defined for tenant"
+            
+        current_margin = signal.metadata.get("current_margin")
+        if current_margin is None:
+            return False, "Data error: current_margin missing from signal metadata"
         
         if current_margin < min_margin:
             return False, f"Margin {current_margin}% is below minimum required {min_margin}%"
 
         # 2. Discount Cap
-        max_discount = self.config.get("max_discount_pct", 15.0)
+        max_discount = self.config.get("max_discount_pct")
+        if max_discount is None:
+            return False, "Configuration error: max_discount_pct not defined for tenant"
+            
         proposed_discount = command.approved_params.get("max_discount", 0.0)
-        
         if proposed_discount > max_discount:
             return False, f"Proposed discount {proposed_discount}% exceeds cap {max_discount}%"
-
-        # 3. Frequency Cap (To be integrated with DB)
-        # if await self._check_frequency(signal.client_id): ...
 
         return True, None
 
     async def is_strategic_account(self, client_id: str) -> bool:
-        # Mock logic or CRM lookup
-        return client_id.startswith("STRAT_")
+        # Check against a provided list in the config
+        strategic_list = self.config.get("strategic_accounts", [])
+        return client_id in strategic_list or client_id.startswith("STRAT_")

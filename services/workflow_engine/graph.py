@@ -52,8 +52,12 @@ async def policy_guardrails_node(state: AgentState) -> Dict[str, Any]:
 
     # 2. Policy Engine Validation
     from services.policy_engine.engine import PolicyEngine
-    # Mock tenant config retrieval
-    tenant_config = {"min_margin_pct": 10.0, "max_discount_pct": 15.0}
+    tenant_config = state.get("tenant_config", {})
+    if not tenant_config:
+        # Fallback to DB if not in state
+        from libs.tenants.config import TenantConfigService
+        tenant_config = TenantConfigService().get_config(state["tenant_id"])
+        
     policy_engine = PolicyEngine(tenant_config)
     
     # Strategic Account Escalation

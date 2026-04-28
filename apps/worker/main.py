@@ -5,8 +5,19 @@ from services.workflow_engine.graph import app
 from libs.persistence.database import init_db, get_engine
 
 async def run_sample():
-    # 0. Initialize DB
-    init_db(get_engine())
+    # 0. Initialize DB and Seed Config
+    engine = get_engine()
+    init_db(engine)
+    
+    from libs.tenants.config import TenantConfigService
+    config_service = TenantConfigService()
+    config_service.update_config("tenant_001", {
+        "min_margin_pct": 12.0,
+        "max_discount_pct": 10.0,
+        "standard_execution_cost": 25.0,
+        "strategic_accounts": ["STRAT_999"],
+        "preferred_channel": "WHATSAPP"
+    })
     # 1. Prepare Mock Payload
     sample_payload = InputPayload(
         tenant_id="tenant_001",

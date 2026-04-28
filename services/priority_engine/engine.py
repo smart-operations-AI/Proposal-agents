@@ -18,6 +18,7 @@ class PriorityEngine:
         return sorted(signals, key=lambda x: (x.priority_score, x.estimated_revenue_impact), reverse=True)
 
     @staticmethod
-    def calculate_roi(signal: InternalSignal, execution_cost: float = 20.0) -> float:
+    def calculate_roi(signal: InternalSignal, execution_cost: float) -> float:
+        """Calculate ROI based on provided execution cost."""
         if execution_cost == 0: return 0
         return (signal.estimated_revenue_impact - execution_cost) / execution_cost

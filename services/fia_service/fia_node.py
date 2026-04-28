@@ -5,39 +5,49 @@ from libs.contracts.models import InternalSignal, SignalType, RevenueCommand
 from libs.memory.chroma_store import ChromaStore
 from libs.telemetry.logger import AgentLogger
 from services.priority_engine.engine import PriorityEngine
+from libs.tenants.config import TenantConfigService
 
 async def fia_decision_node(state: AgentState) -> Dict[str, Any]:
-    logger = AgentLogger("FIA", state["tenant_id"], state.get("trace_id", "unknown"))
+    tenant_id = state["tenant_id"]
+    logger = AgentLogger("FIA", tenant_id, state.get("trace_id", "unknown"))
     logger.info("Starting FIA Decision Process")
+    
+    # 1. Load Tenant Config (No more defaults)
+    config_service = TenantConfigService()
+    tenant_config = config_service.get_config(tenant_id)
+    if not tenant_config:
+        return {"is_blocked": True, "blocking_reason": f"No configuration found for tenant {tenant_id}"}
     
     signals = state.get("signals", [])
     if not signals:
         return {"is_blocked": True, "blocking_reason": "No signals to process"}
 
-    # 1. Ranking through Priority Engine
+    # 2. Ranking through Priority Engine
     priority_engine = PriorityEngine()
     ranked_signals = priority_engine.rank_signals(signals)
     current_signal = ranked_signals[0]
     
-    # 2. Retrieval of Context (RAG)
+    # 3. Retrieval of Context (RAG)
     memory = ChromaStore()
     context = memory.query_policies(
-        tenant_id=state["tenant_id"],
+        tenant_id=tenant_id,
         query_text=f"Playbook for {current_signal.signal_type}"
     )
     
-    # 3. Decision Rationale
-    roi = priority_engine.calculate_roi(current_signal)
-    rationale = f"Selected {current_signal.signal_type} for {current_signal.client_id}. Expected ROI: {roi:.2f}. "
+    # 4. Decision Rationale using Config data
+    exec_cost = tenant_config.get("standard_execution_cost", 0.0)
+    roi = priority_engine.calculate_roi(current_signal, exec_cost)
+    rationale = f"Selected {current_signal.signal_type} for {current_signal.client_id}. ROI: {roi:.2f} (Cost: {exec_cost})."
     
-    # 4. Create Command
+    # 5. Create Command using Config parameters
     command = RevenueCommand(
         command_id=str(uuid.uuid4()),
         signal_id=current_signal.signal_id,
         action_intent=current_signal.signal_type,
         approved_params={
-            "max_discount": current_signal.max_discount_pct or 5.0,
-            "roi": roi
+            "max_discount": current_signal.max_discount_pct or tenant_config.get("default_offer_discount", 0.0),
+            "roi": roi,
+            "channel_preference": tenant_config.get("preferred_channel", "EMAIL")
         },
         guardrail_token="PENDING",
         rationale=rationale
@@ -46,5 +56,6 @@ async def fia_decision_node(state: AgentState) -> Dict[str, Any]:
     return {
         "current_signal": current_signal,
         "active_command": command,
-        "is_blocked": False
+        "is_blocked": False,
+        "tenant_config": tenant_config # Pass it down to avoid multiple DB hits
     }
