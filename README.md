@@ -1,4 +1,4 @@
-# Dataizen Revenue Automation Agents
+# Revenue Automation Agents
 
 Platform for multi-agent revenue automation protocols using FIA (Financial Intelligence Agent) and SEA (Sales Execution Agent).
 
