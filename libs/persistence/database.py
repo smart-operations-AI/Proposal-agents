@@ -1,7 +1,9 @@
 from sqlalchemy import Column, String, Float, Integer, DateTime, Boolean, JSON, ForeignKey, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 import datetime
+import os
 
 Base = declarative_base()
 
@@ -63,13 +65,21 @@ class AuditLog(Base):
     new_state = Column(JSON)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)
 
-import os
-
-# Utility to get engine
+# Utility to get engine (Sync)
 def get_engine(connection_string=None):
     if connection_string is None:
         connection_string = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/revenue_db")
     return create_engine(connection_string)
+
+# Utility to get async engine
+def get_async_engine(connection_string=None):
+    if connection_string is None:
+        # Default to asyncpg driver if not specified
+        url = os.getenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost:5432/revenue_db")
+        if "asyncpg" not in url:
+            url = url.replace("postgresql://", "postgresql+asyncpg://")
+        connection_string = url
+    return create_async_engine(connection_string)
 
 def init_db(engine):
     Base.metadata.create_all(engine)

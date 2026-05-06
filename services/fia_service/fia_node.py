@@ -14,12 +14,7 @@ async def fia_expert_node(state: AgentState) -> Dict[str, Any]:
     logger = AgentLogger("FIA-Expert", tenant_id, state.get("trace_id", "unknown"))
     
     try:
-        # --- Communication setup (Step 5) ---
-        async def handle_risk_query(message: Any):
-            logger.info(f"FIA received risk query: {message}")
-            return {"advice": "Proceed with caution, client has high LTV", "extra_discount_allowed": True}
-        
-        await state["message_bus"].subscribe("risk_query", handle_risk_query)
+        # Step 6: Subscriptions moved to state initialization in graph.py
         
         # --- Standard execution ---
         local_llm = LocalInferenceEngine()
@@ -35,6 +30,7 @@ async def fia_expert_node(state: AgentState) -> Dict[str, Any]:
         Analyze the signal and propose a financial strategy (discounts, ROI optimization).
         Return a JSON with: action, params, confidence, rationale."""
         
+        # Ensure await is used and response is textual
         response = await local_llm.chat(system_prompt, f"Signal: {current_signal.model_dump_json()}")
         result = json.loads(response)
         

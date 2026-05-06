@@ -18,9 +18,9 @@ async def risk_expert_node(state: AgentState) -> Dict[str, Any]:
         bus_responses = await state["message_bus"].publish("risk_query", {"client_id": current_signal.client_id})
         logger.info(f"Risk Expert got feedback from other agents: {bus_responses}")
 
-        # 1. Retrieval of Risk History
+        # 1. Retrieval of Risk History (Step 8: await async query)
         memory = ChromaStore()
-        context = memory.query_policies(
+        context = await memory.query_policies(
             tenant_id=tenant_id,
             query_text=f"Risk profile for client {current_signal.client_id}",
             namespace="risk_expert"
@@ -50,4 +50,5 @@ async def risk_expert_node(state: AgentState) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Risk Expert failed: {str(e)}")
+        # Adding error to state triggers the transition to error_handler in graph.py
         return {"errors": [f"Risk Error: {str(e)}"]}

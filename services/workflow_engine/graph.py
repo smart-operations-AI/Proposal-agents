@@ -25,9 +25,18 @@ async def validate_input_node(state: AgentState) -> Dict[str, Any]:
     if not payload or not payload.predictions:
         return {"is_blocked": True, "blocking_reason": "Empty payload"}
     
+    bus = AgentMessageBus()
+    
+    # Step 6: Initialize subscriptions in state initialization
+    async def fia_risk_handler(message: Any):
+        # This acts as the FIA expert providing feedback to Risk
+        return {"advice": "Proceed with caution, client has high LTV", "extra_discount_allowed": True}
+    
+    await bus.subscribe("risk_query", fia_risk_handler)
+    
     return {
         "is_blocked": False, 
-        "message_bus": AgentMessageBus(),
+        "message_bus": bus,
         "expert_outputs": []
     }
 
@@ -111,6 +120,12 @@ def route_to_experts(state: AgentState) -> List[Send]:
     selected = state.get("selected_experts", ["fia_expert"])
     return [Send(expert, state) for expert in selected]
 
+def check_expert_error(state: AgentState):
+    """Transition to error_handler if errors exist in state, else aggregator"""
+    if state.get("errors"):
+        return "error"
+    return "continue"
+
 def should_continue(state: AgentState):
     if state.get("is_blocked"):
         return "end"
@@ -140,10 +155,16 @@ workflow.add_edge("normalize", "router")
 
 workflow.add_conditional_edges("router", route_to_experts)
 
-workflow.add_edge("fia_expert", "aggregator")
-workflow.add_edge("sea_expert", "aggregator")
-workflow.add_edge("risk_expert", "aggregator")
-workflow.add_edge("escalate", "aggregator")
+# Step 3: Conditional edges from experts to handle errors
+for expert in ["fia_expert", "sea_expert", "risk_expert", "escalate"]:
+    workflow.add_conditional_edges(
+        expert,
+        check_expert_error,
+        {
+            "error": "error_handler",
+            "continue": "aggregator"
+        }
+    )
 
 workflow.add_edge("aggregator", "policy")
 

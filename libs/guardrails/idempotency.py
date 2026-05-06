@@ -1,15 +1,18 @@
 import hashlib
-import json
 from datetime import datetime, timedelta
-from typing import Optional
 from libs.contracts.models import InternalSignal
-from libs.persistence.database import get_engine, SignalRecord
-from sqlalchemy.orm import sessionmaker
+from libs.persistence.database import get_async_engine, SignalRecord
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy import select
 
 class IdempotencyManager:
+    """
+    Manages signal idempotency using asynchronous PostgreSQL.
+    Prevents duplicate actions for the same client and signal type within a specific window.
+    """
     def __init__(self):
-        self.engine = get_engine()
-        self.Session = sessionmaker(bind=self.engine)
+        self.engine = get_async_engine()
+        self.async_session = async_sessionmaker(self.engine, expire_on_commit=False)
 
     def generate_signal_hash(self, signal: InternalSignal) -> str:
         # Create a stable hash based on tenant, client, and signal type
@@ -17,18 +20,23 @@ class IdempotencyManager:
         return hashlib.sha256(data.encode()).hexdigest()
 
     async def is_duplicate(self, signal: InternalSignal, window_days: int = 7) -> bool:
-        signal_hash = self.generate_signal_hash(signal)
-        
-        with self.Session() as session:
-            # Check for existing signals of same type for same client within the window
+        """
+        Checks if a signal has already been executed recently for this client.
+        """
+        async with self.async_session() as session:
             cutoff_date = datetime.now() - timedelta(days=window_days)
-            existing = session.query(SignalRecord).filter(
+            
+            # Use select(SignalRecord) for async SQLAlchemy
+            stmt = select(SignalRecord).where(
                 SignalRecord.tenant_id == signal.tenant_id,
                 SignalRecord.client_id == signal.client_id,
-                SignalRecord.signal_type == signal.signal_type,
+                SignalRecord.signal_type == signal.signal_type.value,
                 SignalRecord.status == "EXECUTED",
-                SignalRecord.expires_at > datetime.now() # Still valid?
-            ).first()
+                SignalRecord.expires_at > datetime.now()
+            )
+            
+            result = await session.execute(stmt)
+            existing = result.scalars().first()
             
             if existing:
                 print(f"[Idempotency] Signal {signal.signal_type} for {signal.client_id} already executed recently.")

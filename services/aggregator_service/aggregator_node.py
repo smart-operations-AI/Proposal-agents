@@ -33,9 +33,17 @@ async def aggregator_node(state: AgentState) -> Dict[str, Any]:
     merged_params = {}
     all_rationales = []
     
-    # For numeric params, calculate weighted average
-    # For categorical, take from expert with highest weight
-    best_expert = expert_names[np.argmax(weights)]
+    # Identify the expert with the highest weight
+    best_idx = np.argmax(weights)
+    best_expert_name = expert_names[best_idx]
+    
+    # Find the ExpertOutput object for the best expert
+    best_expert_output = next((out for out in expert_outputs if out.expert_name == best_expert_name), None)
+    
+    # Step 5: Get action_intent from the best expert, with fallback to signal_type
+    action_intent = current_signal.signal_type
+    if best_expert_output and best_expert_output.output.get("action_intent"):
+        action_intent = best_expert_output.output.get("action_intent")
     
     numeric_params = {}
     
@@ -50,9 +58,8 @@ async def aggregator_node(state: AgentState) -> Dict[str, Any]:
                     numeric_params[k] = 0.0
                 numeric_params[k] += v * weight
             else:
-                # Categorical: only take from the "best" expert (or overwrite if current weight is higher)
-                # Here we just take from the best expert identified earlier
-                if out.expert_name == best_expert:
+                # Categorical: only take from the best expert
+                if out.expert_name == best_expert_name:
                     merged_params[k] = v
 
     # Add weighted numeric params
@@ -61,13 +68,13 @@ async def aggregator_node(state: AgentState) -> Dict[str, Any]:
     command = RevenueCommand(
         command_id=str(uuid.uuid4()),
         signal_id=current_signal.signal_id,
-        action_intent=current_signal.signal_type,
+        action_intent=action_intent,
         approved_params=merged_params,
         guardrail_token="PENDING",
         rationale=" | ".join(all_rationales)
     )
     
-    logger.info(f"Aggregation complete. Primary expert influence: {best_expert}")
+    logger.info(f"Aggregation complete. Primary expert influence: {best_expert_name}")
     
     return {
         "active_command": command,
