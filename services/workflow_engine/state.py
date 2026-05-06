@@ -1,5 +1,7 @@
-from typing import TypedDict, List, Optional, Dict, Any
-from libs.contracts.models import InternalSignal, Outcome, ExecutionLog, InputPayload, RevenueCommand
+from typing import TypedDict, List, Optional, Dict, Any, Annotated
+from libs.contracts.models import InternalSignal, Outcome, ExecutionLog, InputPayload, RevenueCommand, ExpertOutput
+from libs.communication.message_bus import AgentMessageBus
+import operator
 
 class AgentState(TypedDict):
     # Workflow Context
@@ -13,6 +15,12 @@ class AgentState(TypedDict):
     # MoE Multi-Agent Fields
     selected_experts: List[str]
     routing_rationale: Optional[str]
+    
+    # NEW: Aggregated Expert Outputs with Reducer for Parallelism
+    expert_outputs: Annotated[List[ExpertOutput], operator.add]
+    
+    # Message Bus for lateral communication
+    message_bus: AgentMessageBus
     
     # Intelligence Layer Output
     current_signal: Optional[InternalSignal]

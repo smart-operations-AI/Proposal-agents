@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "agents-sdk": {
+      "source": "cloudflare/skills",
+      "sourceType": "github",
+      "skillPath": "skills/agents-sdk/SKILL.md",
+      "computedHash": "01515ef239bee4ab1464d0eb735a857de3832a304fccd9315bf439837c053e62"
+    },
+    "moe-training": {
+      "source": "orchestra-research/ai-research-skills",
+      "sourceType": "github",
+      "skillPath": "19-emerging-techniques/moe-training/SKILL.md",
+      "computedHash": "49b9d70fb7e3e82c33e0f2516fadc9af32cb9626bfb65cd8a0acf72248c272cf"
+    },
+    "openai-agents-sdk": {
+      "source": "laguagu/claude-code-nextjs-skills",
+      "sourceType": "github",
+      "skillPath": "skills/openai-agents-sdk/SKILL.md",
+      "computedHash": "7e903383b09b492f3a7237f41718e7a0d34ae36a09d3182b31a15c175bc3f5e8"
+    }
+  }
+}

@@ -1,3 +1,12 @@
+import os
+import uuid
+import secrets
+from typing import Dict, Any, List
+from langgraph.graph import StateGraph, END
+from langgraph.types import Send
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from sqlalchemy.ext.asyncio import create_async_engine
+
 from .state import AgentState
 from services.router_service.router_node import router_node
 from services.fia_service.fia_node import fia_expert_node
@@ -6,6 +15,7 @@ from services.risk_service.risk_node import risk_expert_node
 from services.escalation_service.escalation_expert_node import escalation_expert_node
 from services.aggregator_service.aggregator_node import aggregator_node
 from services.sea_service.sea_node import sea_execution_node
+from libs.communication.message_bus import AgentMessageBus
 
 # --- Node Definitions ---
 
@@ -14,12 +24,16 @@ async def validate_input_node(state: AgentState) -> Dict[str, Any]:
     payload = state.get("input_payload")
     if not payload or not payload.predictions:
         return {"is_blocked": True, "blocking_reason": "Empty payload"}
-    return {"is_blocked": False}
+    
+    return {
+        "is_blocked": False, 
+        "message_bus": AgentMessageBus(),
+        "expert_outputs": []
+    }
 
 async def signal_normalization_node(state: AgentState) -> Dict[str, Any]:
     print("--- NORMALIZING SIGNALS ---")
     from libs.contracts.models import InternalSignal, SignalType
-    import uuid
     from datetime import datetime, timedelta
     
     signals = []
@@ -62,8 +76,6 @@ async def policy_guardrails_node(state: AgentState) -> Dict[str, Any]:
     if not is_valid:
         return {"is_blocked": True, "blocking_reason": f"Policy Violation: {reason}"}
 
-    # 3. Validation Token Generation
-    import secrets
     return {"is_blocked": False, "validation_token": secrets.token_hex(16)}
 
 async def outcome_tracking_node(state: AgentState) -> Dict[str, Any]:
@@ -88,27 +100,26 @@ async def outcome_tracking_node(state: AgentState) -> Dict[str, Any]:
         outcomes.append(outcome)
     return {"outcomes": outcomes}
 
+async def handle_error_node(state: AgentState) -> Dict[str, Any]:
+    print("--- HANDLING ERROR ---")
+    errors = state.get("errors", [])
+    return {"is_blocked": True, "blocking_reason": f"System Error: {'; '.join(errors)}"}
+
 # --- Routing Logic ---
 
-def route_to_experts(state: AgentState):
-    # This function returns the list of nodes to visit
-    # In Phase 2/3, we might visit only one, but MoE allows k > 1
-    return state.get("selected_experts", ["fia_expert"])
+def route_to_experts(state: AgentState) -> List[Send]:
+    selected = state.get("selected_experts", ["fia_expert"])
+    return [Send(expert, state) for expert in selected]
 
 def should_continue(state: AgentState):
     if state.get("is_blocked"):
         return "end"
     return "continue"
 
-from langgraph.checkpoint.postgres import PostgresSaver
-from libs.persistence.database import get_engine
-import os
-
 # --- Graph Construction ---
 
 workflow = StateGraph(AgentState)
 
-# ... (nodes and edges stay the same)
 workflow.add_node("validate", validate_input_node)
 workflow.add_node("normalize", signal_normalization_node)
 workflow.add_node("router", router_node)
@@ -120,22 +131,14 @@ workflow.add_node("aggregator", aggregator_node)
 workflow.add_node("policy", policy_guardrails_node)
 workflow.add_node("sea_execution", sea_execution_node)
 workflow.add_node("outcome", outcome_tracking_node)
+workflow.add_node("error_handler", handle_error_node)
 
 workflow.set_entry_point("validate")
 
 workflow.add_edge("validate", "normalize")
 workflow.add_edge("normalize", "router")
 
-workflow.add_conditional_edges(
-    "router",
-    route_to_experts,
-    {
-        "fia_expert": "fia_expert",
-        "sea_expert": "sea_expert",
-        "risk_expert": "risk_expert",
-        "escalate": "escalate"
-    }
-)
+workflow.add_conditional_edges("router", route_to_experts)
 
 workflow.add_edge("fia_expert", "aggregator")
 workflow.add_edge("sea_expert", "aggregator")
@@ -156,10 +159,11 @@ workflow.add_conditional_edges(
 workflow.add_edge("sea_execution", "outcome")
 workflow.add_edge("outcome", END)
 
-# Checkpointing with PostgreSQL
-DB_URL = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/revenue_db")
-# Note: In a real environment, PostgresSaver requires an async connection pool
-# For this structure, we define the pattern for persistent auditing
-checkpointer = PostgresSaver.from_conn_string(DB_URL)
+# PostgreSQL Async Checkpointer
+DB_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost:5432/revenue_db")
+engine = create_async_engine(DB_URL)
 
-app = workflow.compile(checkpointer=checkpointer)
+async def get_app():
+    checkpointer = AsyncPostgresSaver(engine)
+    await checkpointer.setup()
+    return workflow.compile(checkpointer=checkpointer)

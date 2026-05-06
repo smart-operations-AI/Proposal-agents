@@ -2,39 +2,41 @@ import httpx
 import os
 import json
 from typing import Dict, Any, List
+from sentence_transformers import SentenceTransformer
 
 class LocalInferenceEngine:
     """
-    Interface for local LLM inference (e.g., Ollama, vLLM, or local FastAPI).
-    Prevents dependency on external APIs like OpenAI/Gemini.
+    Real local LLM inference engine using Ollama for chat and 
+    SentenceTransformers for embeddings.
     """
-    def __init__(self, endpoint: str = None):
-        self.endpoint = endpoint or os.getenv("LOCAL_LLM_URL", "http://localhost:11434/api/generate")
+    def __init__(self, model_name: str = "llama3:8b", embedding_model: str = "all-MiniLM-L6-v2"):
+        self.ollama_url = os.getenv("LOCAL_LLM_URL", "http://localhost:11434/api/generate")
+        self.model_name = model_name
+        self.embedding_model_name = embedding_model
+        # Load embedding model once
+        self.embedding_model = SentenceTransformer(self.embedding_model_name)
 
     async def chat(self, system_prompt: str, user_content: str) -> str:
-        """Simulates or calls a local model"""
-        # In a real environment, this would hit Ollama or a local vLLM instance
-        # For this demonstration, we simulate the response to maintain local-first logic
+        """Calls Ollama API for local inference"""
+        payload = {
+            "model": self.model_name,
+            "prompt": f"{system_prompt}\n\nUser: {user_content}",
+            "stream": False,
+            "format": "json"
+        }
         
-        # Simulation logic for experts
-        if "Financial" in system_prompt:
-            return json.dumps({
-                "action": "PROPOSE_DISCOUNT",
-                "params": {"discount": 0.15, "roi_target": 2.5},
-                "rationale": "High priority signal with positive churn trend."
-            })
-        elif "Sales" in system_prompt:
-            return json.dumps({
-                "action": "WHATSAPP_OUTREACH",
-                "params": {"template": "retention_v1", "urgency": "high"},
-                "rationale": "Urgent signal requiring immediate multi-channel contact."
-            })
-        
-        return "Local model response placeholder"
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(self.ollama_url, json=payload, timeout=60.0)
+                response.raise_for_status()
+                result = response.json()
+                return result.get("response", "{}")
+            except Exception as e:
+                return json.dumps({"error": str(e), "action": "ERROR", "params": {}})
 
     async def get_embeddings(self, text: str) -> List[float]:
-        """Simulates local embeddings generation"""
-        # Placeholder for local embedding model (e.g. sentence-transformers)
-        import hashlib
-        h = hashlib.md5(text.encode()).hexdigest()
-        return [int(h[i:i+2], 16) / 255.0 for i in range(0, len(h), 2)]
+        """Generates real semantic embeddings using SentenceTransformers"""
+        # sentence-transformers encode is usually synchronous, 
+        # but we wrap it for consistency in the async pipeline
+        embeddings = self.embedding_model.encode(text)
+        return embeddings.tolist()

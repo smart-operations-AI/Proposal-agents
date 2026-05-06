@@ -1,23 +1,25 @@
 import asyncio
 from datetime import datetime
 from libs.contracts.models import InputPayload, PredictionEntry
-from services.workflow_engine.graph import app
+from services.workflow_engine.graph import get_app
 from libs.persistence.database import init_db, get_engine
+from libs.adapters.context import crm_adapter_ctx, erp_adapter_ctx, whatsapp_adapter_ctx, email_adapter_ctx
+from unittest.mock import MagicMock
 
 async def run_sample():
     # 0. Initialize DB and Seed Config
-    engine = get_engine()
-    init_db(engine)
+    # In a real environment, you'd have actual DB and Redis running
+    # For the demo, we ensure the structure is correct
     
-    from libs.tenants.config import TenantConfigService
-    config_service = TenantConfigService()
-    config_service.update_config("tenant_001", {
-        "min_margin_pct": 12.0,
-        "max_discount_pct": 10.0,
-        "standard_execution_cost": 25.0,
-        "strategic_accounts": ["STRAT_999"],
-        "preferred_channel": "WHATSAPP"
-    })
+    # engine = get_engine()
+    # init_db(engine)
+    
+    # --- Step 7: Inject Adapters (DI) ---
+    crm_adapter_ctx.set(MagicMock(name="SalesforceCRM"))
+    erp_adapter_ctx.set(MagicMock(name="SAPERP"))
+    whatsapp_adapter_ctx.set(MagicMock(name="WhatsApp"))
+    email_adapter_ctx.set(MagicMock(name="Email"))
+    
     # 1. Prepare Mock Payload
     sample_payload = InputPayload(
         tenant_id="tenant_001",
@@ -32,15 +34,6 @@ async def run_sample():
                 prediction_timestamp=datetime.now(),
                 validity_window_hours=72,
                 recommended_priority=91
-            ),
-            PredictionEntry(
-                client_id="STRAT_999", # Strategic Account
-                model_type="upsell",
-                score=0.95,
-                predicted_value="high_potential",
-                prediction_timestamp=datetime.now(),
-                validity_window_hours=24,
-                recommended_priority=99
             )
         ]
     )
@@ -51,6 +44,8 @@ async def run_sample():
         "trace_id": f"trace_{datetime.now().strftime('%Y%m%d%H%M%S')}",
         "input_payload": sample_payload,
         "signals": [],
+        "expert_outputs": [],
+        "message_bus": None, # Initialized in validate_input_node
         "current_signal": None,
         "active_command": None,
         "is_blocked": False,
@@ -63,17 +58,26 @@ async def run_sample():
         "errors": []
     }
 
-    # 3. Execute Workflow
-    print("Starting Revenue Automation Workflow...")
-    final_state = await app.ainvoke(initial_state)
+    # 3. Compile and Execute Workflow
+    print("Starting Revenue MoE Workflow...")
+    app = await get_app()
     
-    print("\n--- WORKFLOW SUMMARY ---")
-    print(f"Signals Processed: {len(final_state['signals'])}")
-    print(f"Executions Performed: {len(final_state['execution_logs'])}")
-    if final_state.get("is_blocked"):
-        print(f"Status: BLOCKED - {final_state.get('blocking_reason')}")
-    else:
-        print("Status: COMPLETED")
+    try:
+        final_state = await app.ainvoke(initial_state)
+        
+        print("\n--- WORKFLOW SUMMARY ---")
+        print(f"Signals Normalized: {len(final_state.get('signals', []))}")
+        print(f"Experts Responded: {len(final_state.get('expert_outputs', []))}")
+        print(f"Executions Performed: {len(final_state.get('execution_logs', []))}")
+        
+        if final_state.get("is_blocked"):
+            print(f"Status: BLOCKED - {final_state.get('blocking_reason')}")
+        else:
+            print("Status: COMPLETED")
+            if final_state.get("active_command"):
+                print(f"Command Rationale: {final_state['active_command'].rationale}")
+    except Exception as e:
+        print(f"Workflow failed: {str(e)}")
 
 if __name__ == "__main__":
     asyncio.run(run_sample())

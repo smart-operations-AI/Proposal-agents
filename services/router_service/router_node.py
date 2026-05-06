@@ -37,11 +37,11 @@ async def router_node(state: AgentState) -> Dict[str, Any]:
         profile_emb = await local_llm.get_embeddings(profile)
         affinities[expert] = cosine_similarity(signal_emb, profile_emb)
         
-    # 2. Auxiliary Loss: Load Balance Penalty
-    utilization = metrics.get_utilization_rates()
+    # 2. Auxiliary Loss: Load Balance Penalty (Step 6: await metrics)
+    utilization = await metrics.get_utilization_rates()
     adjusted_affinities = {}
     for expert, affinity in affinities.items():
-        # Subtract penalty based on utilization (Auxiliary Loss simulation)
+        # Subtract penalty based on utilization
         penalty = utilization.get(expert, 0) * 0.3 
         adjusted_affinities[expert] = max(0, affinity - penalty)
         
@@ -56,12 +56,15 @@ async def router_node(state: AgentState) -> Dict[str, Any]:
     rationale = f"Semantic affinity scores: { {k: round(v, 2) for k, v in affinities.items()} }. " \
                 f"Selected {selected_experts} after load penalty."
     
-    # Update metrics and signal
-    metrics.log_routing(selected_experts)
+    # Update metrics and signal (Step 6: await metrics)
+    await metrics.log_routing(selected_experts)
     current_signal.expert_affinities = adjusted_affinities
     current_signal.routing_rationale = rationale
     
     logger.info("Routing decision complete", extra={"selected": selected_experts})
+    
+    # Clean up metrics connection
+    await metrics.close()
     
     return {
         "current_signal": current_signal,
