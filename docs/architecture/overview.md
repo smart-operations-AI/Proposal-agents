@@ -15,25 +15,25 @@ The platform is designed to convert predictive signals (churn, upsell, risk) int
 - **Aggregator**: Merges expert outputs using weighted fusion (Softmax) for numeric params and priority-based selection for categorical ones.
 
 ### Execution & Communication
-- **Workflow Engine (LangGraph)**: Manages state transitions with **parallel execution** via Send objects.
-- **Agent Message Bus**: Asynchronous Pub/Sub bus for lateral communication (e.g., Risk Expert querying FIA for advice).
-- **SEA Execution Agent**: Implements actions via CRM/ERP adapters using Dependency Injection (contextvars).
+- **Workflow Engine (LangGraph)**: Manages state transitions with **parallel execution** via Send objects. Includes a robust conditional error-routing system.
+- **Agent Message Bus**: Asynchronous Pub/Sub bus for lateral communication between agents.
+- **SEA Execution Agent**: Implements actions via CRM/ERP adapters using Dependency Injection.
 
 ### Infrastructure Layer
-- **Local Inference**: Offline execution using **Ollama** (Chat) and **SentenceTransformers** (Embeddings).
-- **Persistence**: Multi-tenant SQL (PostgreSQL) with async connection pooling and Redis for telemetry.
+- **Local Inference**: Offline execution using **Ollama (Chat API)** and **SentenceTransformers**.
+- **Persistence**: Multi-tenant SQL (PostgreSQL) with **async connection pooling** and Redis for telemetry.
 - **Memory**: ChromaDB for RAG-based context retrieval.
 
 ## 3. Data Flow
 1. **Ingest & Normalize**: Predictions are converted into `InternalSignals`.
 2. **Route**: The Router selects `k` experts based on semantic affinity and current system load.
 3. **Parallel Expert Execution**: Selected experts run concurrently, communicating via the Message Bus.
-4. **Aggregate**: Outputs are merged into a single `RevenueCommand`.
+4. **Aggregate**: Outputs are merged into a single `RevenueCommand`. If any expert fails, the workflow routes to an Error Handler.
 5. **Guardrail & Execute**: Policies are validated, and SEA executes the command via adapters.
 6. **Track**: Metrics and outcomes are persisted for load balancing and performance analysis.
 
 ## 4. Key Design Principles
 - **Parallel MoE**: Experts run concurrently for reduced latency and specialized accuracy.
-- **Offline First**: Zero dependency on external LLM APIs.
+- **Offline First**: Zero dependency on external LLM APIs (Ollama/Llama3).
 - **Lateral Communication**: Agents collaborate in real-time to resolve dependencies.
 - **Resilience**: Dedicated error-handling nodes and async persistent checkpointing.
